@@ -16,8 +16,8 @@ GEMINI_API_KEY = _get("GEMINI_API_KEY")
 
 EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = 3072
-CHAT_MODEL = "gemini-2.5-flash-lite"
-CHECK_MODEL = "gemini-2.5-flash-lite"
+CHAT_MODEL = "gemini-3.5-flash-lite"
+CHECK_MODEL = "gemini-3.5-flash-lite"
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
