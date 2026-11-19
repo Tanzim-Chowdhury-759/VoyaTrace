@@ -12,11 +12,16 @@ if user is None:
 
 render_logout_sidebar()
 
-pages = [st.Page(user_check.page, title="Check Compliance", icon="✅")]
+pages = [
+    st.Page(user_check.page, title="Check Compliance", icon="✅", url_path="check")
+]
+
 if user["role"] in ("parser", "admin"):
-    pages.append(st.Page(parser_ingest.page, title="Ingest Rules", icon="📥"))
+    pages.append(st.Page(parser_ingest.page, title="Ingest Rules", icon="📥", url_path="ingest"))
+
 if user["role"] == "admin":
-    pages.append(st.Page(admin_dashboard.page, title="Admin Dashboard", icon="🛡️"))
-pages.append(st.Page(user_account.page, title="My Account", icon="👤"))
+    pages.append(st.Page(admin_dashboard.page, title="Admin Dashboard", icon="🛡️", url_path="admin"))
+
+pages.append(st.Page(user_account.page, title="My Account", icon="👤", url_path="account"))
 
 st.navigation(pages).run()
