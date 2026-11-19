@@ -31,25 +31,20 @@ def create_account(username, email, password, role="user"):
     db = get_db()
     if not username or not password:
         return None, "Username and password are required."
+    if db.table("accounts").select("id").eq("username", username).execute().data:
+        return None, "Username already exists."
+    row = {
+        "username": username,
+        "email": email or None,
+        "password_hash": hash_password(password),
+        "role": role,
+    }
     try:
-        # Check if user exists
-        existing = db.table("accounts").select("id").eq("username", username).execute()
-        if existing.data:
-            return None, "Username already exists."
-        
-        # Insert user
-        row = {
-            "username": username,
-            "email": email or None,
-            "password_hash": hash_password(password),
-            "role": role,
-        }
         res = db.table("accounts").insert(row).execute()
         log_event(res.data[0]["id"], "signup", f"{username} ({role})")
         return res.data[0]["id"], None
     except Exception as e:
-        # THIS WILL SHOW THE EXACT ERROR ON SCREEN
-        return None, f"DATABASE ERROR: {str(e)}"
+        return None, f"Signup failed: {e}"
 
 
 def authenticate(username, password):
