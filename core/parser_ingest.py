@@ -18,9 +18,10 @@ def chunk_text(text, size=CHUNK_SIZE):
     return chunks
 
 
-def _deactivate(db, country, route_group, sub_path):
+def _deactivate(db, country, route_group, sub_path, section_title):
     q = (db.table("visa_rules").update({"is_active": False})
          .eq("country", country).eq("route_group", route_group)
+         .eq("section_title", section_title) # <-- Only turn off this specific section
          .eq("is_active", True))
     if sub_path:
         q = q.eq("sub_path", sub_path)
@@ -32,10 +33,12 @@ def _deactivate(db, country, route_group, sub_path):
 def ingest_route(user_id, country, route_group, sub_path, section_title,
                  text, effective_year=None, source_url=None, source_type=None, verified_at=None):
     db = get_db()
-    _deactivate(db, country, route_group, sub_path)
+    
+    # Only deactivate the rules for THIS specific section title
+    _deactivate(db, country, route_group, sub_path, section_title)
 
     chunks = chunk_text(text)
-    vectors = embed_texts(chunks)  # gemini-embedding-001 — parser side only
+    vectors = embed_texts(chunks)
     rows = []
     for i, (c, v) in enumerate(zip(chunks, vectors)):
         rows.append({
