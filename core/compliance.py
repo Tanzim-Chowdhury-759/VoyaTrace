@@ -25,16 +25,32 @@ def run_compliance_check(user_id, country, route_group, sub_path, uploaded_files
     if err:
         return {"error": err}
 
+    db = get_db()
+
     rules = fetch_rules_by_filter(country, route_group, sub_path)
     reqs = fetch_required_documents(country, route_group, sub_path)
+    
     if not rules:
         return {"error": "No rules found for this route. Ask a parser to ingest them first."}
 
+    # Fetch the strict thresholds (failsafe if table is empty/missing)
+    try:
+        t_query = (db.table("route_thresholds").select("*")
+                   .eq("country", country).eq("route_group", route_group))
+        if sub_path:
+            t_query = t_query.eq("sub_path", sub_path)
+        else:
+            t_query = t_query.is_("sub_path", "null")
+        thresholds = t_query.execute().data or []
+    except Exception:
+        thresholds = []
+
     rules_context = format_rules_context(rules)
-    result = check_documents(rules_context, reqs, uploaded_files)
+    
+    # Pass thresholds to the LLM
+    result = check_documents(rules_context, reqs, uploaded_files, thresholds)
 
     session_id = str(uuid.uuid4())
-    db = get_db()
 
     # Store ONLY metadata — no bytes, no text, no embedding.
     for f in uploaded_files:
