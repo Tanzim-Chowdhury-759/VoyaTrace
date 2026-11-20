@@ -24,7 +24,7 @@ CHUNK_OVERLAP = 200
 TOP_K_RETRIEVAL = 6
 
 # Per-upload sanity limits (protects free-tier quota + UI responsiveness)
-MAX_FILE_BYTES = 8 * 1024 * 1024    # 8 MB per file
-MAX_FILES_PER_CHECK = 8
+MAX_FILE_BYTES = 10 * 1024 * 1024    # Increased to 10 MB per file
+MAX_FILES_PER_CHECK = 20 
 
 ALLOWED_COUNTRIES = ["Germany"]
