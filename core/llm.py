@@ -18,10 +18,10 @@ _SUPPORTED_BINARY_MIMES = {
 }
 
 
-def check_documents(rules_context, required_docs, uploaded_files):
+def check_documents(rules_context, required_docs, uploaded_files, thresholds):
     """
-    Raw user bytes -> gemini-2.5-flash-lite in ONE call.
-    No text extraction. No embeddings. No persistence.
+    Raw user bytes -> gemini-3.5-flash-lite in ONE call.
+    Injects strict math and specific document instructions.
     """
     client = _get_client()
     parts = []
@@ -30,12 +30,24 @@ def check_documents(rules_context, required_docs, uploaded_files):
         text="OFFICIAL EMBASSY RULES (retrieved from VoyaTrace knowledge base):\n\n"
              + rules_context))
 
-    req_lines = "\n".join(
-        f"- {d['doc_type']}: {d['doc_label']} (required={d.get('is_required')})"
-        + (f" [{d.get('evidence_label')}]" if d.get("evidence_label") else "")
-        for d in required_docs)
-    parts.append(types.Part.from_text(text="REQUIRED DOCUMENTS:\n" + req_lines))
+    # Inject Strict Math Thresholds
+    if thresholds:
+        t_text = "STRUCTURED THRESHOLDS (STRICT MATH - DO NOT GUESS, USE THESE EXACT RULES):\n"
+        for t in thresholds:
+            t_text += f"- {t['description']}: {t['field']} = {t['amount']} (Condition: {t.get('condition', 'None')})\n"
+        parts.append(types.Part.from_text(text=t_text))
 
+    # Inject Document Instructions
+    req_lines = "REQUIRED DOCUMENTS AND CHECKING INSTRUCTIONS:\n"
+    for d in required_docs:
+        req_lines += f"- {d['doc_type']} ({d.get('requirement_status', 'Mandatory')}): {d['doc_label']}\n"
+        if d.get('trigger_condition'):
+            req_lines += f"  * CONDITION TO TRIGGER: {d['trigger_condition']}\n"
+        if d.get('ai_check_instruction'):
+            req_lines += f"  * HOW TO CHECK: {d['ai_check_instruction']}\n"
+    parts.append(types.Part.from_text(text=req_lines))
+
+    # Add the files
     for f in uploaded_files:
         parts.append(types.Part.from_text(
             text=f"\n===== UPLOADED DOCUMENT: {f['doc_type']} ({f['filename']}) ====="))
@@ -49,17 +61,18 @@ def check_documents(rules_context, required_docs, uploaded_files):
             parts.append(types.Part.from_text(text=text))
 
     parts.append(types.Part.from_text(text="""
-You are a visa compliance checker. Compare the user's uploaded documents against the rules above.
+You are a visa compliance checker. Compare the user's uploaded documents against the rules and thresholds above.
 Return verdicts for each required document and each numbered rule that appears in the rules text:
 - PASS: document clearly satisfies the rule.
 - FAIL: present but numeric/factual gap (e.g. salary below threshold). Compute exact gap.
-- MISSING: document not uploaded, or required fact not stated.
+- MISSING: document not uploaded, or required fact not stated. If a document is CONDITIONAL, only mark MISSING if the user's data triggers the condition.
 - UNKNOWN: cannot determine.
 
 Rules:
 1. Never guarantee a visa outcome. Never check for forgery.
 2. Extract exact numbers/dates verbatim.
-3. If the rules text flags a source conflict (e.g. outdated embassy figures), use the newer 2026 figure and note the discrepancy.
+3. Use the STRUCTURED THRESHOLDS for math. Do not rely on the text for numbers if they conflict.
+4. If the rules text flags a source conflict, use the newer 2026 figure and note the discrepancy.
 
 Return ONLY JSON:
 {
