@@ -29,27 +29,33 @@ def verify_password(pw: str, hashed: str) -> bool:
 
 def create_account(username, email, password, role="user"):
     db = get_db()
-    if not username or not password:
-        return None, "Username and password are required."
+    # Enforce that email is not empty
+    if not username or not password or not email:
+        return None, "Username, Email, and Password are required."
+    
+    # Simple email format check
+    if "@" not in email or "." not in email:
+        return None, "Please enter a valid email address."
+
+    if db.table("accounts").select("id").eq("username", username).execute().data:
+        return None, "Username already exists."
+    
+    # Check if email is already in use
+    if db.table("accounts").select("id").eq("email", email).execute().data:
+        return None, "Email is already registered to another account."
+
+    row = {
+        "username": username,
+        "email": email, # No longer optional
+        "password_hash": hash_password(password),
+        "role": role,
+    }
     try:
-        # Check if user exists
-        existing = db.table("accounts").select("id").eq("username", username).execute()
-        if existing.data:
-            return None, "Username already exists."
-        
-        # Insert user
-        row = {
-            "username": username,
-            "email": email or None,
-            "password_hash": hash_password(password),
-            "role": role,
-        }
         res = db.table("accounts").insert(row).execute()
         log_event(res.data[0]["id"], "signup", f"{username} ({role})")
         return res.data[0]["id"], None
     except Exception as e:
-        # THIS WILL SHOW THE EXACT ERROR ON SCREEN
-        return None, f"DATABASE ERROR: {str(e)}"
+        return None, f"Signup failed: {e}"
 
 
 def authenticate(username, password):
@@ -105,7 +111,10 @@ def render_login():
         with tab_signup:
             st.caption("Users self-register. Parser / Admin accounts require an invite code.")
             new_u = st.text_input("Username", key="signup_u")
-            new_e = st.text_input("Email (optional)", key="signup_e")
+            
+            # Changed from "Email (optional)" to "Email"
+            new_e = st.text_input("Email", key="signup_e") 
+            
             new_p = st.text_input("Password", type="password", key="signup_p")
             new_p2 = st.text_input("Confirm password", type="password", key="signup_p2")
             role = st.selectbox("Role", ["user", "parser", "admin"], key="signup_role")
@@ -114,7 +123,10 @@ def render_login():
                 invite = st.text_input("Invite code", type="password", key="signup_invite")
             
             if st.button("Create account", key="signup_btn", use_container_width=True):
-                if new_p != new_p2:
+                # Added check for email
+                if not new_u or not new_e or not new_p:
+                    st.error("Please fill in all required fields.")
+                elif new_p != new_p2:
                     st.error("Passwords do not match.")
                 elif len(new_p) < 6:
                     st.error("Password must be at least 6 characters.")
