@@ -1,0 +1,161 @@
+import os
+import bcrypt
+import streamlit as st
+from datetime import datetime, timezone
+from core.db import get_db
+from core.system_events import log_event
+
+
+def _get_invite(role: str):
+    """Fetches the specific invite code based on the role requested."""
+    try:
+        if role == "parser":
+            return st.secrets.get("PARSER_INVITE_CODE", "")
+        elif role == "admin":
+            return st.secrets.get("ADMIN_INVITE_CODE", "")
+        return ""
+    except Exception:
+        import os
+        if role == "parser":
+            return os.environ.get("PARSER_INVITE_CODE", "")
+        elif role == "admin":
+            return os.environ.get("ADMIN_INVITE_CODE", "")
+        return ""
+
+
+def hash_password(pw: str) -> str:
+    return bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(pw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(pw.encode(), hashed.encode())
+    except Exception:
+        return False
+
+
+def create_account(username, email, password, role="user"):
+    db = get_db()
+    # Enforce that email is not empty
+    if not username or not password or not email:
+        return None, "Username, Email, and Password are required."
+    
+    # Simple email format check
+    if "@" not in email or "." not in email:
+        return None, "Please enter a valid email address."
+
+    if db.table("accounts").select("id").eq("username", username).execute().data:
+        return None, "Username already exists."
+    
+    # Check if email is already in use
+    if db.table("accounts").select("id").eq("email", email).execute().data:
+        return None, "Email is already registered to another account."
+
+    row = {
+        "username": username,
+        "email": email, # No longer optional
+        "password_hash": hash_password(password),
+        "role": role,
+    }
+    try:
+        res = db.table("accounts").insert(row).execute()
+        log_event(res.data[0]["id"], "signup", f"{username} ({role})")
+        return res.data[0]["id"], None
+    except Exception as e:
+        return None, f"Signup failed: {e}"
+
+
+def authenticate(username, password):
+    db = get_db()
+    res = db.table("accounts").select("*").eq("username", username).execute()
+    if not res.data:
+        return None
+    acc = res.data[0]
+    if not acc.get("is_active"):
+        return None
+    if not verify_password(password, acc["password_hash"]):
+        return None
+    db.table("accounts").update(
+        {"last_login": datetime.now(timezone.utc).isoformat()}
+    ).eq("id", acc["id"]).execute()
+    log_event(acc["id"], "login", acc["username"])
+    return {
+        "id": acc["id"], "username": acc["username"],
+        "email": acc.get("email"), "role": acc["role"],
+        "chat_visible_to_admin": acc.get("chat_visible_to_admin", False),
+    }
+
+
+def get_user():
+    return st.session_state.get("user")
+
+
+def render_login():
+    # Create a centered column (middle column is 1.5x wider than the side columns)
+    _, center_col, _ = st.columns([1, 1.5, 1])
+    
+    with center_col:
+        st.markdown(
+            "<h1 style='text-align: center; margin-bottom: 2rem;'>VoyaTrace</h1>", 
+            unsafe_allow_html=True
+        )
+        
+        tab_login, tab_signup = st.tabs(["Login", "Sign up"])
+
+        with tab_login:
+            u = st.text_input("Username", key="login_u")
+            p = st.text_input("Password", type="password", key="login_p")
+            if st.button("Login", type="primary", key="login_btn", use_container_width=True):
+                acc = authenticate(u, p)
+                if acc:
+                    st.session_state.user = acc
+                    st.rerun()
+                else:
+                    st.error("Invalid credentials.")
+                    log_event(None, "login_failed", u, severity="warning")
+
+        with tab_signup:
+            st.caption("Users self-register. Parser / Admin accounts require an invite code.")
+            new_u = st.text_input("Username", key="signup_u")
+            new_e = st.text_input("Email", key="signup_e") 
+            new_p = st.text_input("Password", type="password", key="signup_p")
+            new_p2 = st.text_input("Confirm password", type="password", key="signup_p2")
+            
+            role = st.selectbox("Role", ["user", "parser", "admin"], key="signup_role")
+            
+            invite = ""
+            if role != "user":
+                # Change the label so it's clear which code they need
+                invite = st.text_input(f"{role.capitalize()} Invite code", type="password", key="signup_invite")
+            
+            if st.button("Create account", key="signup_btn", use_container_width=True):
+                if not new_u or not new_e or not new_p:
+                    st.error("Please fill in all required fields.")
+                elif new_p != new_p2:
+                    st.error("Passwords do not match.")
+                elif len(new_p) < 6:
+                    st.error("Password must be at least 6 characters.")
+                elif role != "user" and invite != _get_invite(role):
+                    # Check the specific invite code for that role
+                    st.error(f"Invalid {role} invite code.")
+                else:
+                    uid, err = create_account(new_u, new_e, new_p, role)
+                    if err:
+                        st.error(err)
+                    else:
+                        st.success("Account created. Log in to continue.")
+
+
+def render_logout_sidebar():
+    with st.sidebar:
+        u = st.session_state.user
+        st.markdown(f"**{u['username']}**  \n`{u['role']}`")
+        if st.button("Logout", key="logout_btn"):
+            log_event(u["id"], "logout", u["username"])
+            st.session_state.user = None
+            st.session_state.chat_history = []
+            st.session_state.uploaded_files = {}
+            st.session_state.last_check = None
+            st.session_state.current_route_key = None
+            st.rerun()
+        st.divider()
