@@ -14,10 +14,7 @@ def _get_client():
 
 _SUPPORTED_BINARY_MIMES = {
     "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document", # DOCX
-    "image/jpeg",
-    "image/png",
-    "image/webp"
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
 
@@ -40,19 +37,17 @@ def check_documents(rules_context, required_docs, uploaded_files, thresholds):
             t_text += f"- {t['description']}: {t['field']} = {t['amount']} (Condition: {t.get('condition', 'None')})\n"
         parts.append(types.Part.from_text(text=t_text))
 
-    # Inject Document Instructions with Status
+    # Inject Document Instructions
     req_lines = "REQUIRED DOCUMENTS AND CHECKING INSTRUCTIONS:\n"
     for d in required_docs:
-        status = d.get('requirement_status', 'Mandatory')
-        req_lines += f"- {d['doc_type']} [STATUS: {status}]: {d['doc_label']}\n"
-        
+        req_lines += f"- {d['doc_type']} ({d.get('requirement_status', 'Mandatory')}): {d['doc_label']}\n"
         if d.get('trigger_condition'):
-            req_lines += f"  * TRIGGER CONDITION: {d['trigger_condition']}\n"
+            req_lines += f"  * CONDITION TO TRIGGER: {d['trigger_condition']}\n"
         if d.get('ai_check_instruction'):
             req_lines += f"  * HOW TO CHECK: {d['ai_check_instruction']}\n"
     parts.append(types.Part.from_text(text=req_lines))
 
-    # Add the user's uploaded files
+    # Add the files
     for f in uploaded_files:
         parts.append(types.Part.from_text(
             text=f"\n===== UPLOADED DOCUMENT: {f['doc_type']} ({f['filename']}) ====="))
@@ -65,21 +60,15 @@ def check_documents(rules_context, required_docs, uploaded_files, thresholds):
                 text = "(unreadable)"
             parts.append(types.Part.from_text(text=text))
 
-    # Final Instructions
     parts.append(types.Part.from_text(text="""
 You are a visa compliance checker. Compare the user's uploaded documents against the rules and thresholds above.
 Return verdicts for each required document and each numbered rule that appears in the rules text:
 - PASS: document clearly satisfies the rule.
 - FAIL: present but numeric/factual gap (e.g. salary below threshold). Compute exact gap.
-- MISSING: document not uploaded, or required fact not stated.
+- MISSING: document not uploaded, or required fact not stated. If a document is CONDITIONAL, only mark MISSING if the user's data triggers the condition.
 - UNKNOWN: cannot determine.
 
-CRITICAL RULES FOR DOCUMENT STATUSES:
-1. [STATUS: Mandatory]: If not uploaded, you MUST output "MISSING".
-2. [STATUS: Conditional]: If not uploaded, check the user's other uploaded documents to see if the TRIGGER CONDITION applies. If the condition applies, output "MISSING". If the condition does not apply (or you cannot tell), output "PASS" (do not penalize the user for not providing it).
-3. [STATUS: Supporting]: If not uploaded, IGNORE IT (do not output "MISSING"). If uploaded, use it as extra context to help evaluate other rules.
-
-General Rules:
+Rules:
 1. Never guarantee a visa outcome. Never check for forgery.
 2. Extract exact numbers/dates verbatim.
 3. Use the STRUCTURED THRESHOLDS for math. Do not rely on the text for numbers if they conflict.
