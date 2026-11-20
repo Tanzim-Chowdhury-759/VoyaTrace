@@ -78,45 +78,54 @@ def get_user():
 
 
 def render_login():
-    st.title("VoyaTrace")
-    st.caption("Evidence-aware visa compliance engine — Germany (prototype)")
-    tab_login, tab_signup = st.tabs(["Login", "Sign up"])
+    # Create a centered column (middle column is 1.5x wider than the side columns)
+    _, center_col, _ = st.columns([1, 1.5, 1])
+    
+    with center_col:
+        # Centered Title (Removed the caption)
+        st.markdown(
+            "<h1 style='text-align: center; margin-bottom: 2rem;'>VoyaTrace</h1>", 
+            unsafe_allow_html=True
+        )
+        
+        tab_login, tab_signup = st.tabs(["Login", "Sign up"])
 
-    with tab_login:
-        u = st.text_input("Username", key="login_u")
-        p = st.text_input("Password", type="password", key="login_p")
-        if st.button("Login", type="primary", key="login_btn"):
-            acc = authenticate(u, p)
-            if acc:
-                st.session_state.user = acc
-                st.rerun()
-            else:
-                st.error("Invalid credentials.")
-                log_event(None, "login_failed", u, severity="warning")
-
-    with tab_signup:
-        st.caption("Users self-register. Parser / Admin accounts require an invite code.")
-        new_u = st.text_input("Username", key="signup_u")
-        new_e = st.text_input("Email (optional)", key="signup_e")
-        new_p = st.text_input("Password", type="password", key="signup_p")
-        new_p2 = st.text_input("Confirm password", type="password", key="signup_p2")
-        role = st.selectbox("Role", ["user", "parser", "admin"], key="signup_role")
-        invite = ""
-        if role != "user":
-            invite = st.text_input("Invite code", type="password", key="signup_invite")
-        if st.button("Create account", key="signup_btn"):
-            if new_p != new_p2:
-                st.error("Passwords do not match.")
-            elif len(new_p) < 6:
-                st.error("Password must be at least 6 characters.")
-            elif role != "user" and invite != _get_invite():
-                st.error("Invalid invite code.")
-            else:
-                uid, err = create_account(new_u, new_e, new_p, role)
-                if err:
-                    st.error(err)
+        with tab_login:
+            u = st.text_input("Username", key="login_u")
+            p = st.text_input("Password", type="password", key="login_p")
+            if st.button("Login", type="primary", key="login_btn", use_container_width=True):
+                acc = authenticate(u, p)
+                if acc:
+                    st.session_state.user = acc
+                    st.rerun()
                 else:
-                    st.success("Account created. Log in to continue.")
+                    st.error("Invalid credentials.")
+                    log_event(None, "login_failed", u, severity="warning")
+
+        with tab_signup:
+            st.caption("Users self-register. Parser / Admin accounts require an invite code.")
+            new_u = st.text_input("Username", key="signup_u")
+            new_e = st.text_input("Email (optional)", key="signup_e")
+            new_p = st.text_input("Password", type="password", key="signup_p")
+            new_p2 = st.text_input("Confirm password", type="password", key="signup_p2")
+            role = st.selectbox("Role", ["user", "parser", "admin"], key="signup_role")
+            invite = ""
+            if role != "user":
+                invite = st.text_input("Invite code", type="password", key="signup_invite")
+            
+            if st.button("Create account", key="signup_btn", use_container_width=True):
+                if new_p != new_p2:
+                    st.error("Passwords do not match.")
+                elif len(new_p) < 6:
+                    st.error("Password must be at least 6 characters.")
+                elif role != "user" and invite != _get_invite():
+                    st.error("Invalid invite code.")
+                else:
+                    uid, err = create_account(new_u, new_e, new_p, role)
+                    if err:
+                        st.error(err)
+                    else:
+                        st.success("Account created. Log in to continue.")
 
 
 def render_logout_sidebar():
