@@ -30,7 +30,7 @@ def _deactivate(db, country, route_group, sub_path):
 
 
 def ingest_route(user_id, country, route_group, sub_path, section_title,
-                 text, effective_year=None, source_url=None):
+                 text, effective_year=None, source_url=None, source_type=None, verified_at=None):
     db = get_db()
     _deactivate(db, country, route_group, sub_path)
 
@@ -48,6 +48,8 @@ def ingest_route(user_id, country, route_group, sub_path, section_title,
             "embedding": v,
             "effective_year": effective_year,
             "source_url": source_url,
+            "source_type": source_type,
+            "verified_at": str(verified_at) if verified_at else None,
             "created_by": user_id,
             "is_active": True,
             "version": 1,
