@@ -46,27 +46,58 @@ def page():
         _chat_sidebar(user)
         return
 
-    st.subheader("Upload required documents")
     st.caption(
-        "PDFs are sent raw to Gemini and discarded after the check. "
+        "Files are sent raw to Gemini and discarded after the check. "
         "VoyaTrace stores only filename, size, and hash — never document content."
     )
+    
     uploads = st.session_state.setdefault("uploaded_files", {})
-    for r in reqs:
-        key = r["doc_type"]
-        label = f"{r['doc_label']}{' *' if r.get('is_required') else ''}"
-        f = st.file_uploader(
-            label, key=f"upload_{route_key}_{key}",
-            type=["pdf", "txt", "docx"],
-            accept_multiple_files=False,
-        )
-        if f is not None:
-            uploads[key] = {
-                "doc_type": key,
-                "filename": f.name,
-                "mime_type": f.type or "application/octet-stream",
-                "bytes": f.read(),
-            }
+
+    # Split the required docs into three groups based on status
+    mandatory_docs = [r for r in reqs if r.get("requirement_status", "Mandatory") == "Mandatory"]
+    conditional_docs = [r for r in reqs if r.get("requirement_status") == "Conditional"]
+    supporting_docs = [r for r in reqs if r.get("requirement_status") == "Supporting"]
+
+    def render_uploaders(doc_list, is_optional=False):
+        for r in doc_list:
+            key = r["doc_type"]
+            # Add asterisk only if it's mandatory
+            asterisk = " *" if not is_optional else " (Optional)"
+            label = f"{r['doc_label']}{asterisk}"
+            
+            f = st.file_uploader(
+                label, key=f"upload_{route_key}_{key}",
+                type=["pdf", "txt", "docx", "jpg", "jpeg", "png"],
+                accept_multiple_files=False,
+            )
+            
+            # Show the trigger condition for conditional docs
+            if r.get("trigger_condition"):
+                st.caption(f"⚠️ **Condition:** {r['trigger_condition']}")
+                
+            if f is not None:
+                uploads[key] = {
+                    "doc_type": key,
+                    "filename": f.name,
+                    "mime_type": f.type or "application/octet-stream",
+                    "bytes": f.read(),
+                }
+
+    # --- RENDER UI SECTIONS ---
+    if mandatory_docs:
+        st.subheader("Mandatory Documents")
+        render_uploaders(mandatory_docs)
+
+    if conditional_docs:
+        st.subheader("Conditional Documents")
+        st.info("You only need to upload these if the condition applies to you.")
+        render_uploaders(conditional_docs)
+
+    if supporting_docs:
+        with st.expander("➕ Add Optional / Supporting Documents"):
+            render_uploaders(supporting_docs, is_optional=True)
+
+    st.divider()
 
     if st.button("Run compliance check", type="primary"):
         if not uploads:
