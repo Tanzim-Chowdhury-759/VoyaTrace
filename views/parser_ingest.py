@@ -34,19 +34,21 @@ def page():
     with col1:
         country = st.selectbox("Country", ALLOWED_COUNTRIES)
     with col2:
-        route_group = st.text_input("Route group (e.g. EU Blue Card)")
+        # We use a text input here, but Streamlit automatically reruns the app
+        # and loads everything below as soon as you press Enter.
+        route_group = st.text_input("Route group (e.g. EU Blue Card)", key="active_route")
     with col3:
         sub_path = st.text_input("Sub-path (optional)")
 
     if not route_group:
-        st.info("Please enter a Route group above to start.")
+        st.info("Please type a Route Group above and press Enter to load existing data.")
         return
 
     st.divider()
 
-    # --- SECTION 1: STRUCTURED THRESHOLDS (The Math) ---
+    # --- SECTION 1: STRUCTURED THRESHOLDS ---
     st.subheader("1. Structured Thresholds (Strict Math)")
-    st.caption("Add hard numbers here so the AI doesn't have to guess from text. E.g., Age >= 45 requires 55,770 EUR.")
+    st.caption("Add hard numbers here so the AI doesn't have to guess from text.")
     
     with st.form("threshold_form", clear_on_submit=True):
         t_col1, t_col2, t_col3, t_col4 = st.columns(4)
@@ -66,7 +68,7 @@ def page():
             else:
                 st.error("Description is required.")
 
-    # Show current thresholds
+    # Load existing thresholds
     t_query = db.table("route_thresholds").select("*").eq("country", country).eq("route_group", route_group)
     if sub_path:
         t_query = t_query.eq("sub_path", sub_path)
@@ -75,13 +77,17 @@ def page():
     
     thresholds = t_query.execute().data
     if thresholds:
-        st.dataframe(thresholds, use_container_width=True)
-        del_t_id = st.number_input("Delete Threshold ID (0 = none)", min_value=0, step=1, value=0, key="del_t")
-        if del_t_id and st.button("Delete Threshold"):
-            db.table("route_thresholds").delete().eq("id", int(del_t_id)).execute()
-            st.rerun()
+        # Create a friendly format for the selectbox
+        thresh_dict = {f"[{t['id']}] {t['description']} ({t['condition']})": t['id'] for t in thresholds}
+        st.write("**Existing Thresholds:**")
+        selected_thresh = st.selectbox("Select a threshold to delete", ["(Select to delete)"] + list(thresh_dict.keys()))
+        
+        if selected_thresh != "(Select to delete)":
+            if st.button(f"🗑️ Delete Threshold: {selected_thresh}"):
+                db.table("route_thresholds").delete().eq("id", thresh_dict[selected_thresh]).execute()
+                st.rerun()
     else:
-        st.caption("No thresholds defined yet.")
+        st.caption("No thresholds defined yet for this route.")
 
     st.divider()
 
@@ -109,16 +115,20 @@ def page():
                     "section_title": section_title, "chunks": n, "source_type": source_type
                 })
                 log_event(user["id"], "parser_ingest", f"{country}/{route_group} ({n} chunks)")
-                st.success(f"Ingested {n} chunks.")
+                st.success(f"Ingested {n} chunks. (Previous rules for this section are now deactivated).")
                 st.rerun()
 
-    # Show active rules
+    # Load active rules
     rules = (db.table("visa_rules")
-             .select("id, chunk_index, section_title, source_type, verified_at, is_active")
+             .select("id, chunk_index, section_title, source_type, verified_at")
              .eq("country", country).eq("route_group", route_group)
              .eq("is_active", True).order("chunk_index").execute().data or [])
     if rules:
-        st.dataframe(rules, use_container_width=True)
+        with st.expander(f"📄 View Active Ingested Rules ({len(rules)} chunks)"):
+            st.dataframe(rules, use_container_width=True)
+            st.caption("Note: To update a rule, simply paste the new text in the form above and click 'Ingest Rules'. The old text is automatically deactivated.")
+    else:
+        st.caption("No active rules ingested yet.")
 
     st.divider()
 
@@ -126,19 +136,41 @@ def page():
     st.subheader("3. Required Document Slots")
     st.caption("Tell the AI exactly how to check each document.")
     
-    with st.form("doc_form", clear_on_submit=True):
+    # Load existing docs to populate the edit dropdown
+    existing_docs = fetch_required_documents(country, route_group, sub_path or None)
+    doc_options = ["➕ Add New Document Slot"] + [d['doc_type'] for d in existing_docs]
+    
+    selected_doc = st.selectbox("Select a document to Edit, or Add New:", doc_options)
+
+    # Default form values
+    d_type, d_label, d_status, d_cond, d_prompt = "", "", "Mandatory", "", ""
+
+    # If editing an existing doc, populate the form fields
+    if selected_doc != "➕ Add New Document Slot":
+        for d in existing_docs:
+            if d['doc_type'] == selected_doc:
+                d_type = d['doc_type']
+                d_label = d['doc_label']
+                d_status = d.get('requirement_status', 'Mandatory')
+                d_cond = d.get('trigger_condition') or ""
+                d_prompt = d.get('ai_check_instruction') or ""
+                break
+
+    with st.form("doc_form"):
         d_col1, d_col2, d_col3 = st.columns(3)
-        doc_type = d_col1.text_input("doc_type (slug)", placeholder="bank_statement")
-        doc_label = d_col2.text_input("Label shown to user", placeholder="Recent Bank Statement")
-        req_status = d_col3.selectbox("Requirement Status", ["Mandatory", "Conditional", "Supporting"])
+        # Disable changing the doc_type if we are editing an existing one
+        doc_type = d_col1.text_input("doc_type (slug)", value=d_type, disabled=(selected_doc != "➕ Add New Document Slot"))
+        doc_label = d_col2.text_input("Label shown to user", value=d_label, placeholder="Recent Bank Statement")
         
-        trigger_cond = ""
-        if req_status == "Conditional":
-            trigger_cond = st.text_input("Trigger Condition", placeholder="e.g. Only if applying under 45 age rule")
-            
-        ai_prompt = st.text_area("AI Check Instruction", placeholder="Extract the final balance. Check if it is >= 11,904 EUR.")
+        # Set the index of the selectbox based on the existing status
+        status_options = ["Mandatory", "Conditional", "Supporting"]
+        status_index = status_options.index(d_status) if d_status in status_options else 0
+        req_status = d_col3.selectbox("Requirement Status", status_options, index=status_index)
         
-        if st.form_submit_button("Upsert Document Slot"):
+        trigger_cond = st.text_input("Trigger Condition (Only if status is 'Conditional')", value=d_cond, placeholder="e.g. Only if applicant is over 45")
+        ai_prompt = st.text_area("AI Check Instruction", value=d_prompt, placeholder="Extract the final balance. Check if it is >= 11,904 EUR.")
+        
+        if st.form_submit_button("Save Document Slot"):
             if not doc_type or not doc_label:
                 st.error("doc_type and Label are required.")
             else:
@@ -151,14 +183,16 @@ def page():
                     "display_order": 99
                 }).execute()
                 log_event(user["id"], "parser_upsert_doc", f"{country}/{route_group}/{doc_type}")
-                st.success(f"Upserted document slot '{doc_type}'.")
+                st.success(f"Saved document slot '{doc_type}'.")
                 st.rerun()
 
-    # Show current docs
-    existing = fetch_required_documents(country, route_group, sub_path or None)
-    if existing:
-        st.dataframe(existing, use_container_width=True)
-        del_doc_id = st.number_input("Delete Document ID (0 = none)", min_value=0, step=1, value=0, key="del_d")
-        if del_doc_id and st.button("Delete Document Slot"):
-            db.table("required_documents").delete().eq("id", int(del_doc_id)).execute()
-            st.rerun()
+    # Show all existing docs and delete option
+    if existing_docs:
+        st.write("**Existing Document Slots:**")
+        st.dataframe(existing_docs, use_container_width=True)
+        
+        del_doc = st.selectbox("Select a document to delete", ["(Select to delete)"] + [d['doc_type'] for d in existing_docs])
+        if del_doc != "(Select to delete)":
+            if st.button(f"🗑️ Delete Document: {del_doc}"):
+                _delete_required_doc(db, country, route_group, sub_path or None, del_doc)
+                st.rerun()
