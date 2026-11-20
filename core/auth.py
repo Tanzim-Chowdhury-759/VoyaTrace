@@ -6,14 +6,21 @@ from core.db import get_db
 from core.system_events import log_event
 
 
-def _get_invite():
+def _get_invite(role: str):
+    """Fetches the specific invite code based on the role requested."""
     try:
-        code = st.secrets.get("INVITE_CODE")
-        if code:
-            return code
+        if role == "parser":
+            return st.secrets.get("PARSER_INVITE_CODE", "")
+        elif role == "admin":
+            return st.secrets.get("ADMIN_INVITE_CODE", "")
+        return ""
     except Exception:
-        pass
-    return os.environ.get("INVITE_CODE", "")
+        import os
+        if role == "parser":
+            return os.environ.get("PARSER_INVITE_CODE", "")
+        elif role == "admin":
+            return os.environ.get("ADMIN_INVITE_CODE", "")
+        return ""
 
 
 def hash_password(pw: str) -> str:
@@ -88,7 +95,6 @@ def render_login():
     _, center_col, _ = st.columns([1, 1.5, 1])
     
     with center_col:
-        # Centered Title (Removed the caption)
         st.markdown(
             "<h1 style='text-align: center; margin-bottom: 2rem;'>VoyaTrace</h1>", 
             unsafe_allow_html=True
@@ -111,27 +117,27 @@ def render_login():
         with tab_signup:
             st.caption("Users self-register. Parser / Admin accounts require an invite code.")
             new_u = st.text_input("Username", key="signup_u")
-            
-            # Changed from "Email (optional)" to "Email"
             new_e = st.text_input("Email", key="signup_e") 
-            
             new_p = st.text_input("Password", type="password", key="signup_p")
             new_p2 = st.text_input("Confirm password", type="password", key="signup_p2")
+            
             role = st.selectbox("Role", ["user", "parser", "admin"], key="signup_role")
+            
             invite = ""
             if role != "user":
-                invite = st.text_input("Invite code", type="password", key="signup_invite")
+                # Change the label so it's clear which code they need
+                invite = st.text_input(f"{role.capitalize()} Invite code", type="password", key="signup_invite")
             
             if st.button("Create account", key="signup_btn", use_container_width=True):
-                # Added check for email
                 if not new_u or not new_e or not new_p:
                     st.error("Please fill in all required fields.")
                 elif new_p != new_p2:
                     st.error("Passwords do not match.")
                 elif len(new_p) < 6:
                     st.error("Password must be at least 6 characters.")
-                elif role != "user" and invite != _get_invite():
-                    st.error("Invalid invite code.")
+                elif role != "user" and invite != _get_invite(role):
+                    # Check the specific invite code for that role
+                    st.error(f"Invalid {role} invite code.")
                 else:
                     uid, err = create_account(new_u, new_e, new_p, role)
                     if err:
